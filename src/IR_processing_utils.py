@@ -130,7 +130,7 @@ def create_mesh (min_lon, max_lon, min_lat, max_lat, shape):
     xy_mesh_flat = xy_mesh.reshape((-1, 2))
     return x_mesh, y_mesh, xy_mesh_flat
 
-def compare_polygons (img_array, img_df, i1, i2):
+def compare_polygons (img_array, img_df, i1, i2, draw_figure = False):
     pol1 = img_df['Polygon'][i1]
     pol2 = img_df['Polygon'][i2]
 
@@ -156,10 +156,41 @@ def compare_polygons (img_array, img_df, i1, i2):
         delta_t  = pol1_t_mean - pol2_t_mean
         weight = 0.5 * (np.sum(pol1_mask.flatten()) + np.sum(pol2_mask.flatten())) / (img_array.shape[0]*img_array.shape[1])
 
+        
+        if draw_figure:
+            min_x = np.min([pol1_x.min(), pol2_x.min()])
+            max_x = np.max([pol1_x.max(), pol2_x.max()])
+            min_y = np.min([pol1_y.min(), pol2_y.min()])
+            max_y = np.max([pol1_y.max(), pol2_y.max()])
+            min_t = np.min([pol1_t.min(), pol2_t.min()])
+            max_t = np.max([pol1_t.max(), pol2_t.max()])
+
+
+            plt.figure()
+            plt.pcolormesh (pol1_x, pol1_y,pol1_t, vmin = min_t, vmax = max_t) 
+            plt.plot(*pol1.exterior.xy, '-k')
+            plt.plot(*pol2.exterior.xy, '-k')
+            plt.xlim([min_x, max_x])
+            plt.ylim([min_y, max_y])
+            plt.colorbar()
+            plt.savefig('1.png')
+            
+            
+
+            plt.figure()
+            plt.pcolormesh (pol2_x, pol2_y,pol2_t, vmin = min_t, vmax = max_t) 
+            plt.plot(*pol1.exterior.xy, '-k')
+            plt.plot(*pol2.exterior.xy, '-k')
+            plt.xlim([min_x, max_x])
+            plt.ylim([min_y, max_y])
+            plt.colorbar()
+            
+            plt.savefig('2.png')
+            
+
         return delta_t, weight
     else:
         return np.nan, 0
-
 
 def calc_diff_matrix (img_array, img_df):
     corr_matrix = np.zeros((img_df.shape[0], img_df.shape[0]))*np.nan
@@ -182,8 +213,16 @@ def apply_corr2diff_matrix (corr_matrix, corr):
             corr_matrix_new[i,j] = corr_matrix[i,j] + corr[i] - corr[j]
     return corr_matrix_new
 
+def apply_corr2array (img_array, corr):
+    img_array_corr = img_array.copy()
+    for i, c in enumerate (corr):
+        img_array_corr[:,:,i] += c
 
+    mean_diff = img_array_corr.mean() - img_array.mean()
 
+    img_array_corr -= mean_diff
+
+    return img_array_corr
 
 def write_IR_image (img_data, dest_path, exif_src_path = None, exiftool_path = 'exiftool.exe'):
         
@@ -201,11 +240,6 @@ def write_IR_image (img_data, dest_path, exif_src_path = None, exiftool_path = '
 def write_IR_image_dict (d:dict):
     return write_IR_image (d['img_data'], d['dest_path'], d['exif_src_path'], d['exiftool_path'])
 
-        # tiff.imwrite(out_path, np.flipud(cur_data), photometric='minisblack')
-        # cmd = 'exiftool.exe -tagsfromfile "%s" "%s"'%(org_path, out_path)
-        # subprocess.run(cmd, check=True, shell=True)
-        # os.remove(out_path + '_original')
-
 def write_IR_images (img_array:np.ndarray, img_df:pd.DataFrame, out_dir:str, raw_dir:str, n_jobs = 1, exiftool_path = 'exiftool.exe'):
     
     d = [{'img_data': img_array[:,:,i], 
@@ -215,11 +249,6 @@ def write_IR_images (img_array:np.ndarray, img_df:pd.DataFrame, out_dir:str, raw
 
     with Pool(n_jobs) as p:
         res = list(p.imap(write_IR_image_dict, tqdm(d, total=len(d))))
-
-
-    
-
-
 
 
 def read_IR_image (file):
@@ -285,7 +314,7 @@ def read_IR_images (data_dir, reload = False, n_jobs = 1, N_files = None):
     return img_array, img_df
     
 
-def init_polygons (img_df, sensor_size, flight_height):
+def init_polygons4df (img_df, sensor_size, flight_height):
     img_polygons = []
 
     for i in img_df.index:
@@ -322,16 +351,57 @@ def init_polygons (img_df, sensor_size, flight_height):
 
     return img_df
 
-def apply_corr2array (img_array, corr):
-    img_array_corr = img_array.copy()
-    for i, c in enumerate (corr):
-        img_array_corr[:,:,i] += c
+def calc_azimuth4df (img_df):
+    gps_az = np.zeros_like (img_df.gps_lon)
+    for i in range (0, img_df.shape[0]-1):
+        gps_az[i] = calc_compass_bearing ((img_df.gps_lat[i],img_df.gps_lon[i]), (img_df.gps_lat[i+1],img_df.gps_lon[i+1]))
+    gps_az[-1] = gps_az[-2]
+    res_df = img_df.copy()
+    res_df['gps_azimuth'] = gps_az
+    return res_df
 
-    mean_diff = img_array_corr.mean() - img_array.mean()
+def identify_swaths4df (img_df, min_segment_len = 3):   
 
-    img_array_corr -= mean_diff
+    img_N = img_df.shape[0]
 
-    return img_array_corr
+    def calc_delta_az (az1, az2):
+        delta = np.abs(az1-az2)
+        if delta > 180:
+            delta = 360-delta
+        return delta
+
+    delta_az = np.abs(np.diff(img_df['gps_azimuth'], prepend=0))
+    delta_az[delta_az > 180] = 360 - delta_az[delta_az > 180]
+
+    swath_id = np.zeros_like(img_df['gps_azimuth'])
+    swath_pos = np.zeros_like(img_df['gps_azimuth'])
+
+    cur_swath_id = 0
+    cur_swath_pos = 1
+    sign = 1
+    swath_az = img_df['gps_azimuth'][0]
+
+    for i in range (0, img_N):
+        swath_id[i] = cur_swath_id
+        swath_pos[i] = cur_swath_pos
+        cur_swath_pos += 1 * sign
+        cur_delta_az = []
+        for j in range (i, min(img_N, i+min_segment_len)):
+            cur_delta_az.append (calc_delta_az (swath_az, img_df['gps_azimuth'][j]))
+        
+        if cur_delta_az[0] > 170 and np.min(cur_delta_az) > 170:
+            print ('identify_swaths4df(): segment %d reached %d\n'%(cur_swath_id, cur_swath_pos))
+            cur_swath_id += 1
+            sign *= -1
+            cur_swath_pos = 1 * sign
+            swath_az = img_df['gps_azimuth'][i]
+
+    res_df = img_df.copy()
+    res_df['delta_az']  = delta_az
+    res_df['swath_id']  = swath_id
+    res_df['swath_pos'] = swath_pos
+    return res_df
+
 
 def sigma_tend_corr_single (diff2prev, n_sigma=3):
     
@@ -372,199 +442,43 @@ def detrend_corr (img_array):
     corr = mean_vals_dt - mean_vals
     return corr
 
+def preview_photos (img_data, img_df, idx2preview, diff_matrix = None, save_dir = None):
 
-def run_L1_corr (img_array, diff_matrix, use_detrend, pics_dir = None, fig_name = 'L1_corr'):
+    img_shape = img_data.shape
 
-    img_N = img_array.shape[2]
+    if save_dir is not None and not os.path.isdir (save_dir):
+        os.mkdir (save_dir)
 
-    corr_tend = np.array([diff_matrix[i, i-1] if i > 0 else 0 for i in range (0, img_N)])
+    plt.figure()
 
-    L1_corr, L1_diff2prev, outlier_ind = sigma_tend_corr_multi (corr_tend)
+    min_val = np.percentile (img_data.flatten(), 1)
+    max_val = np.percentile (img_data.flatten(), 99)
 
-    img_array_new = apply_corr2array (img_array, L1_corr)
-    diff_matrix_new = apply_corr2diff_matrix (diff_matrix, L1_corr)
+    for idx in idx2preview:
+        
+        plt.clf()
+        for pol in img_df['Polygon']:
+            plt.plot(*pol.exterior.xy, '-k', color = 'gray')
 
-    if use_detrend:
-        L1_corr_dt      = detrend_corr (img_array_new)
-        img_array_new   = apply_corr2array (img_array_new, L1_corr_dt)
-        diff_matrix_new = apply_corr2diff_matrix (diff_matrix_new, L1_corr_dt)
+        plt_x_lim = plt.xlim()
+        plt_y_lim = plt.ylim()
 
-    mean_t0 = np.mean(np.mean(img_array,     axis=0), axis=0)
-    mean_t1 = np.mean(np.mean(img_array_new, axis=0), axis=0)
-    t0_diff_mean = np.diff (mean_t0)
-    t1_diff_mean = np.diff (mean_t1)
+        pol = img_df['Polygon'][idx]
 
-    if pics_dir is not None:
-        fig, ax = plt.subplots(3,1, sharex = True)
-        ax[0].plot(mean_t0, label = 't0 (raw)')
-        ax[0].plot(outlier_ind, mean_t0[outlier_ind], 'ok')
-        ax[0].plot(mean_t1, label = 't1')
-        ax[0].legend()
+        plt.plot(*pol.exterior.xy, '-k', linewidth = 3)
 
-        ax[1].plot(L1_corr, label = 'L1 corr')
-        ax[1].legend()
-
-
-        ax[2].plot (corr_tend, label = 'corr_tend (t0)')
-        ax[2].plot (outlier_ind, corr_tend[outlier_ind], 'ok')
-        ax[2].plot(t0_diff_mean, label = 'diff2prev (t0)')
-        ax[2].plot(t1_diff_mean, label = 'diff2prev (t1)')
-        ax[2].legend()
-
-        plt.savefig(pics_dir + fig_name + ', detrend=' + str (use_detrend) + '.png')
-    
-    return img_array_new, diff_matrix_new
-
-def run_L2_corr (img_array, diff_matrix, use_detrend, n_steps, wnd_size, pics_dir = None, fig_name = 'L2_corr'):
-    
-    img_N = img_array.shape[2]
-
-    diff_matrix_new = diff_matrix.copy()
-    img_array_new = img_array.copy()
-    
-    for step in range (0, n_steps):
-
-        corr_tend_c = np.array([diff_matrix_new[i+1, i-1] if (i > 0 and i < img_N - 1) else 0 for i in range (0, img_N)])
-        corr_tend_l = np.array([diff_matrix_new[i+1, i]   if  i < img_N - 1 else 0 for i in range (0, img_N)])
-        corr_tend_r = np.array([diff_matrix_new[i, i-1]   if  i > 0 else 0 for i in range (0, img_N)])
-
-        corr_tend = (corr_tend_c / 2 + corr_tend_l + corr_tend_r) / 3
-        corr_tend [np.isnan(corr_tend)] = 0
-
-        corr_tend_sm  =  np.convolve(corr_tend, np.ones(wnd_size)/wnd_size, mode='same')    
-
-        L2_corr = -np.cumsum(corr_tend_sm)
-        if use_detrend:
-            L2_corr = scipy.signal.detrend (L2_corr)
-
-        img_array_new = apply_corr2array (img_array_new, L2_corr)
-        diff_matrix_new = apply_corr2diff_matrix (diff_matrix_new, L2_corr)
+        x_mesh, y_mesh, _ = create_mesh (img_df['min_lon'][idx], img_df['max_lon'][idx],
+                                         img_df['min_lat'][idx], img_df['max_lat'][idx], img_shape)
 
         
-        if pics_dir is not None:
+        plt.pcolormesh (x_mesh, y_mesh, img_data[:,:,idx], vmin = min_val, vmax = max_val, zorder = 100) #, alpha=0.5)
 
-            fig, ax = plt.subplots(3,1, sharex = True)
-    
-            mean_t1 = np.mean(np.mean(img_array, axis=0), axis=0)
-            mean_t2 = np.mean(np.mean(img_array_new, axis=0), axis=0)
-            
-            t1_diff_mean = np.diff (mean_t1)
-            t2_diff_mean = np.diff (mean_t2)
-
-            if step == 0:
-                mean_t2_step0 = mean_t2
-                L2_corr_step0 = L2_corr
-
-            ax[0].plot(mean_t1, '-k', label = 't1')
-            ax[0].plot(mean_t2_step0, label = 't2 (step = 0)')
-            ax[0].plot(mean_t2,       label = 't2 (step = %d)'%step)
-            ax[0].legend()
-
-            ax[1].plot(corr_tend,    label = 'corr_tend')
-            ax[1].plot(corr_tend_sm, label = 'corr_tend_sm')
-            ax[1].plot(t1_diff_mean, label = 'diff2prev (t1)', linewidth = 0.5)
-            ax[1].plot(t2_diff_mean, label = 'diff2prev (t2)', linewidth = 0.5)
-            ax[1].legend()
-
-            ax[2].plot(L2_corr_step0, label = 'L2 corr (step = 0)')
-            ax[2].plot(L2_corr,       label = 'L2 corr (step = %d)'%step)
-            ax[2].legend()
-            
-            plt.savefig(pics_dir + '%s, step = %d, detrend=%d'%(fig_name, step, use_detrend) + '.png')
-    return img_array_new, diff_matrix_new
-
-def run_L3_corr (img_array, img_df, diff_matrix, diff_weights, use_detrend, n_steps, wnd_size, pics_dir = None, fig_name = 'L3_corr'):
-    img_N = img_array.shape[2]
-
-    crd = np.arange(0, img_N)
-
-    mean_t2 = np.mean(np.mean(img_array, axis=0), axis=0)
-
-
-    diff_matrix_new = diff_matrix.copy()
-    img_array_new = img_array.copy()
-    
-    for step in range (0, n_steps):
-
-        L3_corr = np.zeros_like(img_df['gps_lon'])
-
-        for i in tqdm (range (0, img_N)):
-
-            diff_line = diff_matrix_new[i, :]
-            weight_line = diff_weights[i, :]
-
-            ind2sel = np.where(~np.isnan(diff_line))[0]
-
-            gps_az_diff = img_df['gps_azimuth'] - img_df['gps_azimuth'][i]
-            gps_az_diff = np.mod (np.abs(gps_az_diff), 360)
-
-            # display(img_df['gps_azimuth'][idx2test])
-            # display(img_df['gps_azimuth'][idx2test-1])
-            # display(gps_az_diff[idx2test-1])
-            # display(np.abs(np.mod (gps_az_diff[idx2test-1], 360)))
-
-            ind2sel_az =  np.where(~np.isnan(diff_line) & (gps_az_diff > 45))[0]
-
-            #L3_corr[i] = -np.mean(diff_line[ind2sel_az])/2
-            L3_corr[i] = -0.5 * np.sum(diff_line[ind2sel_az] * weight_line[ind2sel_az]) / np.sum(weight_line[ind2sel_az])
-
-            if np.isnan(L3_corr[i]):
-                idx2test = i
-
-                display (mean_t2[idx2test])
-                display (mean_t2[ind2sel_az])
-                display (corr_line[ind2sel_az])
-
-                ind2draw = slice (np.min(ind2sel), np.max(ind2sel))
-                plt.figure()
-                plt.scatter(img_df['gps_lon'], img_df['gps_lat'], 25, mean_t2, edgecolor = 'white')
-                plt.scatter(img_df['gps_lon'][ind2draw], img_df['gps_lat'][ind2draw], 25, mean_t2[ind2draw], edgecolor = 'gray')
-                plt.scatter(img_df['gps_lon'][ind2sel], img_df['gps_lat'][ind2sel], 25, mean_t2[ind2sel], edgecolor = 'black')
-                plt.scatter(img_df['gps_lon'][ind2sel_az], img_df['gps_lat'][ind2sel_az], 25, mean_t2[ind2sel_az], 's', edgecolor = 'black')
-
-                plt.scatter(img_df['gps_lon'][idx2test], img_df['gps_lat'][idx2test], 25, mean_t2[idx2test], edgecolor = 'red')
-
-
-                plt.figure()
-                plt.pcolormesh(crd[ind2draw], crd[ind2draw], corr_matrix[ind2draw, ind2draw], cmap='seismic')
-
-
-                plt.plot(crd[idx2test], crd[idx2test], 'sr', markerfacecolor="None")
-                for i in ind2sel_az:
-                    plt.plot(crd[idx2test], crd[i], 'sk', markerfacecolor="None", markersize = 2)
-                    plt.plot(crd[i], crd[idx2test], 'sk', markerfacecolor="None", markersize = 2)
-
-                plt.figure()
-                plt.plot(crd[ind2sel], test_line[ind2sel], 'o')
-                break
-
-        L3_corr_sm = np.convolve(L3_corr, np.ones(wnd_size)/wnd_size, mode='same')   
-
-        img_array_new = apply_corr2array(img_array_new, L3_corr_sm)
-        diff_matrix_new =  apply_corr2diff_matrix(diff_matrix_new, L3_corr_sm)
-
+        plt.xlim(plt_x_lim)
+        plt.ylim(plt_y_lim)
+        #cx.add_basemap(plt.gca(), source = cx.providers.Esri.WorldImagery, crs = 4326)            
+        plt.gca().set_aspect(1.0/np.cos(np.array(plt.ylim()).mean()*np.pi/180))
         
-
-        if pics_dir is not None:
-
-            mean_t3 = np.mean(np.mean(img_array_new, axis=0), axis=0)
-
-            if step == 0:
-                mean_t3_step0 = mean_t3
-                L3_corr_step0 = L3_corr
+        if save_dir is not None:
+            plt.savefig(save_dir + str(idx)+'.png')
 
 
-            fig, ax = plt.subplots(2,1, sharex = True)
-            ax[0].plot(mean_t2, '-k', label = 't2')
-            ax[0].plot(mean_t3_step0, label = 't3, step = 0')
-            ax[0].plot(mean_t3, label = 't3, step = %d'%step)
-            ax[0].legend()
-
-            ax[1].plot(L3_corr_step0, label = 'L3 corr, step = 0')
-            ax[1].plot(L3_corr, label = 'L3 corr, step = %d'%step)
-            ax[1].plot(L3_corr_sm, label = 'L3 corr sm, step = %d'%step)
-            ax[1].legend()
-
-            plt.savefig(pics_dir + '%s, step = %d, detrend=%d'%(fig_name, step, use_detrend) + '.png')
-            
-    return img_array_new, diff_matrix_new        
