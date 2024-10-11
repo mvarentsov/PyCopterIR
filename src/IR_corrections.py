@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
+from scipy import  ndimage
 
 from IR_processing_utils import *
 
@@ -15,8 +16,59 @@ def apply_corr2diff_matrix (corr_matrix, corr):
             corr_matrix_new[i,j] = corr_matrix[i,j] + corr[i] - corr[j]
     return corr_matrix_new
 
+def circular_filter(image_data, radius):
+    kernel = np.zeros((2*radius+1, 2*radius+1))
+    y, x = np.ogrid[-radius:radius+1, -radius:radius+1]
+    mask = x**2 + y**2 <= radius**2
+    kernel[mask] = 1
+    kernel = kernel / kernel.sum()
+    filtered_image = ndimage.convolve (image_data, kernel)
+    return filtered_image     
 
-def run_L1_corr (img_array, diff_matrix, use_detrend, pics_dir = None, fig_name = 'L1_corr'):
+def run_L0_corr (img_array, img_df, radius, pics_dir = None, fig_name = 'L0_corr'):
+    img_N = img_array.shape[2]
+    img_array_new = img_array.copy()
+    
+    unique_dirs = img_df['folder'].unique()
+
+    for unique_dir in unique_dirs:
+        idx = np.where(img_df['folder'] == unique_dir)[0]
+        #display(idx)
+
+    
+        mean_corr = img_array[:,:,idx].mean(axis=2) - img_array[:,:,idx].mean()
+
+        mean_corr_sm1 = circular_filter (mean_corr, radius)
+        #mean_corr_sm2 = scipy.ndimage.filters.gaussian_filter(mean_corr, [radius, radius], mode='constant')
+
+        for i in idx: #range (0, img_N):
+            img_array_new[:,:,i]  = img_array_new[:,:,i]  - mean_corr_sm1
+
+        f, ax = plt.subplots (1,2, sharex=True, sharey=True)
+        plt.subplots_adjust(left = 0.01, bottom = 0.01,top = 0.98, right = 0.98) #, hspace=0.01,wspace=0.01)
+
+        if pics_dir is not None:
+            
+            plt.axes(ax[0])
+            plt.pcolormesh(mean_corr, vmin=-0.75, vmax=0.75, cmap = 'seismic')
+            plt.gca().set_aspect(1)
+            
+            plt.axes(ax[1])
+            plt.pcolormesh(mean_corr_sm1, vmin=-0.75, vmax=0.75, cmap = 'seismic')
+            plt.gca().set_aspect(1)
+
+            # plt.subplot(1,3,3)
+            # plt.pcolormesh(mean_corr_sm2, vmin=-0.75, vmax=0.75, cmap = 'seismic')
+            # plt.gca().set_aspect(1)
+
+            plt.suptitle(unique_dir)
+
+
+            plt.savefig(pics_dir + fig_name + '.png')
+        
+    return img_array_new
+
+def run_L1_corr (img_array, diff_matrix, use_detrend, pics_dir = None, fig_name = 'L1_corr', opts_str = ''):
 
     img_N = img_array.shape[2]
 
@@ -54,11 +106,11 @@ def run_L1_corr (img_array, diff_matrix, use_detrend, pics_dir = None, fig_name 
         ax[2].plot(t1_diff_mean, label = 'diff2prev (t1)')
         ax[2].legend()
 
-        plt.savefig(pics_dir + fig_name + ', detrend=' + str (use_detrend) + '.png')
+        plt.savefig(pics_dir + fig_name + ', ' + opts_str + '.png')
     
     return img_array_new, diff_matrix_new
 
-def run_L2_corr (img_array, diff_matrix, use_detrend, n_steps, wnd_size, k, pics_dir = None, fig_name = 'L2_corr'):
+def run_L2_corr (img_array, diff_matrix, use_detrend, n_steps, wnd_size, k, pics_dir = None, fig_name = 'L2_corr', opts_str = ''):
     
     img_N = img_array.shape[2]
 
@@ -86,7 +138,7 @@ def run_L2_corr (img_array, diff_matrix, use_detrend, n_steps, wnd_size, k, pics
         
         if pics_dir is not None:
 
-            fig, ax = plt.subplots(4,1, sharex = True)
+            fig, ax = plt.subplots(3,1, sharex = True)
     
             mean_t1 = np.mean(np.mean(img_array, axis=0), axis=0)
             mean_t2 = np.mean(np.mean(img_array_new, axis=0), axis=0)
@@ -118,10 +170,10 @@ def run_L2_corr (img_array, diff_matrix, use_detrend, n_steps, wnd_size, k, pics
 
             ax[2].set_xlim([0, img_N])
             
-            plt.savefig(pics_dir + '%s, step = %d, detrend=%d'%(fig_name, step, use_detrend) + '.png')
+            plt.savefig(pics_dir + '%s, step = %d, %s'%(fig_name, step, opts_str) + '.png')
     return img_array_new, diff_matrix_new
 
-def run_L3_corr (img_array, img_df, diff_matrix, diff_weights, use_detrend, n_steps, wnd_size, pics_dir = None, fig_name = 'L3_corr'):
+def run_L3_corr (img_array, img_df, diff_matrix, diff_weights, n_steps, wnd_size, pics_dir = None, fig_name = 'L3_corr', opts_str = ''):
     img_N = img_array.shape[2]
 
     crd = np.arange(0, img_N)
@@ -213,12 +265,12 @@ def run_L3_corr (img_array, img_df, diff_matrix, diff_weights, use_detrend, n_st
             ax[1].plot(L3_corr_sm, label = 'L3 corr sm, step = %d'%step)
             ax[1].legend()
 
-            plt.savefig(pics_dir + '%s, step = %d, detrend=%d'%(fig_name, step, use_detrend) + '.png')
+            plt.savefig(pics_dir + '%s, step = %d, %s'%(fig_name, step, opts_str) + '.png')
             
     return img_array_new, diff_matrix_new    
 
 
-def run_L4_corr (img_array, img_df, diff_matrix, lowess_width = 0.5, pics_dir = None, fig_name = 'L4_corr'):
+def run_L4_corr (img_array, img_df, diff_matrix, lowess_width = 0.5, pics_dir = None, fig_name = 'L4_corr', opts_str = ''):
 
     img_df = img_df.copy()
 
@@ -253,6 +305,8 @@ def run_L4_corr (img_array, img_df, diff_matrix, lowess_width = 0.5, pics_dir = 
         ax[1].plot(y_sm, label = 'T appriximated')
         ax[1].plot(img_df['mean_t_new'], label = 'T after L4')
 
-        plt.savefig(pics_dir + '%s'%(fig_name) + '.png')
+        ax[1].legend()
+
+        plt.savefig(pics_dir + fig_name + ', ' + opts_str + '.png')
 
     return img_array_new, diff_matrix_new

@@ -224,28 +224,30 @@ def apply_corr2array (img_array, corr):
 
     return img_array_corr
 
-def write_IR_image (img_data, dest_path, exif_src_path = None, exiftool_path = 'exiftool.exe'):
+def write_IR_image (img_data, dest_path, exif_src_path = None, exiftool_path = 'exiftool.exe', update_files = True):
         
-    tiff.imwrite(dest_path, np.flipud(img_data), photometric='minisblack')
+    if not os.path.isfile (dest_path) or update_files:
+        tiff.imwrite(dest_path, np.flipud(img_data), photometric='minisblack')
 
-    if exif_src_path is not None:
+        if exif_src_path is not None:
 
-        cmd = '%s -tagsfromfile "%s" "%s"'%(exiftool_path, exif_src_path, dest_path)
-        subprocess.run(cmd, check=True, shell=True)
-        os.remove(dest_path + '_original')
+            cmd = '%s -tagsfromfile "%s" "%s"'%(exiftool_path, exif_src_path, dest_path)
+            subprocess.run(cmd, check=True, shell=True)
+            os.remove(dest_path + '_original')
 
     return True
 
 
 def write_IR_image_dict (d:dict):
-    return write_IR_image (d['img_data'], d['dest_path'], d['exif_src_path'], d['exiftool_path'])
+    return write_IR_image (d['img_data'], d['dest_path'], d['exif_src_path'], d['exiftool_path'], d['update_files'])
 
-def write_IR_images (img_array:np.ndarray, img_df:pd.DataFrame, out_dir:str, raw_dir:str, n_jobs = 1, exiftool_path = 'exiftool.exe'):
+def write_IR_images (img_array:np.ndarray, img_df:pd.DataFrame, out_dir:str,  n_jobs = 1, exiftool_path = 'exiftool.exe', update_files = True):
     
     d = [{'img_data': img_array[:,:,i], 
           'dest_path':     out_dir + '\\' + img_df['file'][idx], 
-          'exif_src_path': raw_dir + '\\' + img_df['file'][idx], 
-          'exiftool_path': exiftool_path} for i, idx in enumerate(img_df.index)]
+          'exif_src_path': img_df['folder'][idx] + '\\' + img_df['file'][idx], 
+          'exiftool_path': exiftool_path,
+          'update_files': update_files} for i, idx in enumerate(img_df.index)]
 
     with Pool(n_jobs) as p:
         res = list(p.imap(write_IR_image_dict, tqdm(d, total=len(d))))
@@ -260,8 +262,13 @@ def read_IR_image (file):
     exif_df = pd.DataFrame()
     exif_df['file'] = [os.path.basename(str(file))]
     
-    exif_df['gps_lat'] = decimal_coords(exif_tags['GPS GPSLatitude'], exif_tags['GPS GPSLatitudeRef'])
-    exif_df['gps_lon'] = decimal_coords(exif_tags['GPS GPSLongitude'], exif_tags['GPS GPSLongitudeRef'])
+    
+    
+    try:
+        exif_df['gps_lat'] = decimal_coords(exif_tags['GPS GPSLatitude'], exif_tags['GPS GPSLatitudeRef'])
+        exif_df['gps_lon'] = decimal_coords(exif_tags['GPS GPSLongitude'], exif_tags['GPS GPSLongitudeRef'])
+    except Exception as err:
+        print ('hi exception')
     
     for key in exif_tags.keys():
         try:
@@ -311,6 +318,8 @@ def read_IR_images (data_dir, reload = False, n_jobs = 1, N_files = None):
         with open(pkl_path, 'rb') as handle:
             img_array, img_df = pickle.load(handle)
 
+    img_df['folder'] = data_dir
+
     return img_array, img_df
     
 
@@ -318,6 +327,7 @@ def init_polygons4df (img_df, sensor_size, flight_height):
     img_polygons = []
 
     for i in img_df.index:
+        #print(img_df['file'][i])
         focal_lengh = img_df['EXIF FocalLength'][i]
 
         img_h= flight_height * sensor_size [0] / (focal_lengh) 
@@ -330,10 +340,13 @@ def init_polygons4df (img_df, sensor_size, flight_height):
 
         alpha = 90 - np.rad2deg (np.arctan (img_h/img_w)) #90 
 
-        p1 = geodesic (meters=dist).destination((lat_c, lon_c), alpha)
-        p2 = geodesic (meters=dist).destination((lat_c, lon_c), 180-alpha) 
-        p3 = geodesic (meters=dist).destination((lat_c, lon_c), -(180-alpha))
-        p4 = geodesic (meters=dist).destination((lat_c, lon_c), -alpha)
+        try:
+            p1 = geodesic (meters=dist).destination((lat_c, lon_c), alpha)
+            p2 = geodesic (meters=dist).destination((lat_c, lon_c), 180-alpha) 
+            p3 = geodesic (meters=dist).destination((lat_c, lon_c), -(180-alpha))
+            p4 = geodesic (meters=dist).destination((lat_c, lon_c), -alpha)
+        except Exception as err:
+            print ('hello exception')
 
         pol = Polygon (((p1[1], p1[0]), (p2[1], p2[0]), (p3[1], p3[0]), (p4[1], p4[0])))
 
@@ -354,13 +367,16 @@ def init_polygons4df (img_df, sensor_size, flight_height):
 def calc_azimuth4df (img_df):
     gps_az = np.zeros_like (img_df.gps_lon)
     for i in range (0, img_df.shape[0]-1):
-        gps_az[i] = calc_compass_bearing ((img_df.gps_lat[i],img_df.gps_lon[i]), (img_df.gps_lat[i+1],img_df.gps_lon[i+1]))
+        try:
+            gps_az[i] = calc_compass_bearing ((img_df.gps_lat[i],img_df.gps_lon[i]), (img_df.gps_lat[i+1],img_df.gps_lon[i+1]))
+        except Exception as err:
+            print ('hi error')
     gps_az[-1] = gps_az[-2]
     res_df = img_df.copy()
     res_df['gps_azimuth'] = gps_az
     return res_df
 
-def identify_swaths4df (img_df, min_segment_len = 3):   
+def identify_swaths4df (img_df, min_segment_len = 3, crit_delta_az = 170):   
 
     img_N = img_df.shape[0]
 
@@ -376,12 +392,21 @@ def identify_swaths4df (img_df, min_segment_len = 3):
     swath_id = np.zeros_like(img_df['gps_azimuth'])
     swath_pos = np.zeros_like(img_df['gps_azimuth'])
 
+    cur_swath_start = 0
     cur_swath_id = 0
     cur_swath_pos = 1
     sign = 1
-    swath_az = img_df['gps_azimuth'][0]
+    swath_az = img_df['gps_azimuth'][0] #to do: calculate azimuth based on data for all swaths
 
     for i in range (0, img_N):
+        swath_az_all = img_df['gps_azimuth'][cur_swath_start:i+1]
+
+        n_avg = min (len(swath_az_all), int ((len(swath_az_all))/2))
+        u = np.mean(np.sin(np.radians(swath_az_all[:n_avg])))
+        v = np.mean(np.cos(np.radians(swath_az_all[:n_avg])))
+
+        avg_az = np.degrees(np.arctan2(u, v))
+    
         swath_id[i] = cur_swath_id
         swath_pos[i] = cur_swath_pos
         cur_swath_pos += 1 * sign
@@ -389,8 +414,9 @@ def identify_swaths4df (img_df, min_segment_len = 3):
         for j in range (i, min(img_N, i+min_segment_len)):
             cur_delta_az.append (calc_delta_az (swath_az, img_df['gps_azimuth'][j]))
         
-        if cur_delta_az[0] > 170 and np.min(cur_delta_az) > 170:
-            print ('identify_swaths4df(): segment %d reached %d\n'%(cur_swath_id, cur_swath_pos))
+        if cur_delta_az[0] > crit_delta_az and np.min(cur_delta_az) > crit_delta_az:
+            print ('identify_swaths4df(): segment %d reached %d with az %d, mean_az %d\n'%(cur_swath_id, cur_swath_pos, int(swath_az), int(avg_az)))
+            cur_swath_start = i
             cur_swath_id += 1
             sign *= -1
             cur_swath_pos = 1 * sign
@@ -446,7 +472,7 @@ def preview_photos (img_data, img_df, idx2preview, diff_matrix = None, save_dir 
 
     img_shape = img_data.shape
 
-    if save_dir is not None and not os.path.isdir (save_dir):
+    if f is not None and not os.path.isdir (save_dir):
         os.mkdir (save_dir)
 
     plt.figure()
