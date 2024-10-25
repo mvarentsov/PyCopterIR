@@ -293,6 +293,8 @@ def read_IR_images (data_dir, reload = False, n_jobs = 1, N_files = None):
 
         files = sorted(glob.glob (data_dir + '/*.tiff'))
 
+        assert len(files) > 0, 'no tiff files found in %s' % (data_dir)
+
         if N_files is not None:
             files = files[0:N_files]  
 
@@ -376,7 +378,7 @@ def calc_azimuth4df (img_df):
     res_df['gps_azimuth'] = gps_az
     return res_df
 
-def identify_swaths4df (img_df, min_segment_len = 3, crit_delta_az = 170):   
+def identify_swaths4df (img_df, min_segment_len = 5, crit_delta_az = 170):   
 
     img_N = img_df.shape[0]
 
@@ -396,7 +398,7 @@ def identify_swaths4df (img_df, min_segment_len = 3, crit_delta_az = 170):
     cur_swath_id = 0
     cur_swath_pos = 1
     sign = 1
-    swath_az = img_df['gps_azimuth'][0] #to do: calculate azimuth based on data for all swaths
+    swath_az = np.nan # img_df['gps_azimuth'][0] #to do: calculate azimuth based on data for all swaths
 
     for i in range (0, img_N):
         swath_az_all = img_df['gps_azimuth'][cur_swath_start:i+1]
@@ -406,21 +408,23 @@ def identify_swaths4df (img_df, min_segment_len = 3, crit_delta_az = 170):
         v = np.mean(np.cos(np.radians(swath_az_all[:n_avg])))
 
         avg_az = np.degrees(np.arctan2(u, v))
+        if avg_az < 0:
+            avg_az += 360
     
         swath_id[i] = cur_swath_id
         swath_pos[i] = cur_swath_pos
         cur_swath_pos += 1 * sign
         cur_delta_az = []
         for j in range (i, min(img_N, i+min_segment_len)):
-            cur_delta_az.append (calc_delta_az (swath_az, img_df['gps_azimuth'][j]))
+            cur_delta_az.append (calc_delta_az (avg_az, img_df['gps_azimuth'][j]))
         
-        if cur_delta_az[0] > crit_delta_az and np.min(cur_delta_az) > crit_delta_az:
-            print ('identify_swaths4df(): segment %d reached %d with az %d, mean_az %d\n'%(cur_swath_id, cur_swath_pos, int(swath_az), int(avg_az)))
+        if np.abs (cur_swath_pos) > min_segment_len and cur_delta_az[0] > crit_delta_az and np.min(cur_delta_az) > crit_delta_az:
+            print ('identify_swaths4df(): segment %d reached %d with mean_az %d\n'%(cur_swath_id, cur_swath_pos, int(avg_az)))
             cur_swath_start = i
             cur_swath_id += 1
             sign *= -1
             cur_swath_pos = 1 * sign
-            swath_az = img_df['gps_azimuth'][i]
+            #swath_az = img_df['gps_azimuth'][i]
 
     res_df = img_df.copy()
     res_df['delta_az']  = delta_az
