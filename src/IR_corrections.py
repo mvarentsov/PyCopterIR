@@ -116,6 +116,8 @@ def run_L2_corr (img_array, diff_matrix, use_detrend, n_steps, wnd_size, k, pics
 
     diff_matrix_new = diff_matrix.copy()
     img_array_new = img_array.copy()
+
+    fig = plt.figure()
     
     for step in range (0, n_steps):
 
@@ -139,8 +141,6 @@ def run_L2_corr (img_array, diff_matrix, use_detrend, n_steps, wnd_size, k, pics
         
         if pics_dir is not None:
 
-            fig, ax = plt.subplots(3,1, sharex = True)
-    
             mean_t1 = np.mean(np.mean(img_array, axis=0), axis=0)
             mean_t2 = np.mean(np.mean(img_array_new, axis=0), axis=0)
             
@@ -150,6 +150,9 @@ def run_L2_corr (img_array, diff_matrix, use_detrend, n_steps, wnd_size, k, pics
             if step == 0:
                 mean_t2_step0 = mean_t2
                 L2_corr_step0 = L2_corr
+
+            plt.clf()
+            ax = fig.subplots(3,1, sharex = True)
 
             ax[0].plot(mean_t1, '-k', label = 'T before L2')
             ax[0].plot(mean_t2_step0, label = 'T after L2 (step = 0)')
@@ -276,7 +279,7 @@ def run_L3_corr (img_array, img_df, diff_matrix, diff_weights, n_steps, wnd_size
     return img_array_new, diff_matrix_new    
 
 
-def run_L4_corr (img_array, img_df, diff_matrix, lowess_width = 0.5, pics_dir = None, fig_name = 'L4_corr', opts_str = '', wnd_size = None):
+def run_L4_corr (img_array, img_df, diff_matrix, use_detrend, lowess_width = 0.5, pics_dir = None, fig_name = 'L4_corr', opts_str = '', wnd_size = None):
 
     img_df = img_df.copy()
 
@@ -285,6 +288,10 @@ def run_L4_corr (img_array, img_df, diff_matrix, lowess_width = 0.5, pics_dir = 
     swath_pos = img_df['swath_pos']
     idx_neg = np.where(swath_pos < 0)[0]
     idx_pos = np.where(swath_pos > 0)[0]
+
+    ids_neg = img_df['swath_id'][idx_neg].unique()
+    ids_pos = img_df['swath_id'][idx_pos].unique()
+
 
     y_sm = np.zeros_like(img_df['mean_t'])
     y_sm[idx_neg] = lowess.lowess(swath_pos [idx_neg], img_df['mean_t'][idx_neg], bandwidth=0.5)
@@ -301,18 +308,29 @@ def run_L4_corr (img_array, img_df, diff_matrix, lowess_width = 0.5, pics_dir = 
     img_array_new   = apply_corr2array       (img_array, corr_sm)
     diff_matrix_new = apply_corr2diff_matrix (diff_matrix, corr_sm)
 
+    if use_detrend:
+        corr_dt      = detrend_corr (img_array_new)
+        img_array_new   = apply_corr2array (img_array_new, corr_dt)
+        diff_matrix_new = apply_corr2diff_matrix (diff_matrix_new, corr_dt)
+
     if pics_dir is not None:
         
         img_df['mean_t_new'] = np.mean(np.mean(img_array_new, axis=0), axis=0)
 
         fig, ax = plt.subplots(3,1) #, sharex = True)
-        ax[0].plot(swath_pos, img_df['mean_t'], 'ok')
+        #ax[0].plot(swath_pos, img_df['mean_t'], 'ok')
 
-        ax[0].plot(swath_pos[idx_neg], img_df['mean_t'][idx_neg], 'ob')
-        ax[0].plot(swath_pos[idx_pos], img_df['mean_t'][idx_pos], 'or')
+        unique_ids = np.unique(img_df['swath_id'])
+        for id in unique_ids:
+            ax[0].plot (swath_pos[img_df['swath_id'] == id], img_df['mean_t'][img_df['swath_id'] == id])
+        #ax[0].plot(swath_pos[idx_neg], img_df['mean_t'][idx_neg], 'ob')
+        #ax[0].plot(swath_pos[idx_pos], img_df['mean_t'][idx_pos], 'or')
 
-        ax[0].plot(swath_pos[idx_neg], y_sm[idx_neg], 'ok')
-        ax[0].plot(swath_pos[idx_pos], y_sm[idx_pos], 'ok')
+        ax[0].plot(swath_pos[idx_neg], y_sm[idx_neg], 'ob')
+        ax[0].plot(swath_pos[idx_pos], y_sm[idx_pos], 'or')
+
+        ax[0].set_xlabel ('Position in swath (number of image)')
+        ax[0].set_xlabel ('Temperature, °C')
 
         ax[1].plot(corr, label = 'L4 corr')
         ax[1].plot(corr_sm, label = 'L4 corr smoothed')

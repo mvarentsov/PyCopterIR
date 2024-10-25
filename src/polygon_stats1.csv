@@ -1,2 +1,2 @@
-;fname;mean_t1;mean_t2;mean_t3;mean_t4;mean_t5;mean_t6
-0;DJI_202404230843_017_Pleystocen-IR5_emis1_L3dt_geocorr.tif;;;;;-6.823392;-6.4820757
+;fname;t_mean1;t_std1;t_mean2;t_std2;t_mean3;t_std3;t_mean4;t_std4;t_mean5;t_std5;t_mean6;t_std6
+0;DJI_202404230843_017_Pleystocen-IR5_emis1_L3dt_geocorr.tif;;;;;;;;;-6.823392;1.402765;-6.4820757;1.5004929
