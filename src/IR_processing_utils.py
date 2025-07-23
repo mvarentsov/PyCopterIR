@@ -1,4 +1,4 @@
-import os, sys, io, math
+import os, sys, io, math, time 
 import glob
 import subprocess
 import pickle
@@ -23,6 +23,8 @@ from geopy.distance import distance, geodesic
 
 import rasterio
 from pyproj import Transformer
+
+import cv2
 
 
 def get_subarray_coords_rio (arr_shape, src_crs, trs, dest_crs = 4326):
@@ -130,7 +132,7 @@ def create_mesh (min_lon, max_lon, min_lat, max_lat, shape):
     xy_mesh_flat = xy_mesh.reshape((-1, 2))
     return x_mesh, y_mesh, xy_mesh_flat
 
-def compare_polygons (img_array, img_df, i1, i2, draw_figure = False):
+def img_diff_poly (img_array, img_df, i1, i2, draw_figure = False):
     pol1 = img_df['Polygon'][i1]
     pol2 = img_df['Polygon'][i2]
 
@@ -192,14 +194,86 @@ def compare_polygons (img_array, img_df, i1, i2, draw_figure = False):
     else:
         return np.nan, 0
 
-def calc_diff_matrix (img_array, img_df):
+def img_diff_SIFT (img_array, img_df, i1, i2, draw_figure = False):
+    
+    pol1 = img_df['Polygon'][i1]
+    pol2 = img_df['Polygon'][i2]
+
+    pol_intersect = pol1.intersection(pol2)
+
+    if i1 != i2 and pol_intersect.area > pol1.area * 0.25:
+
+        # if img_df['file'][i1] == 'DJI_20240812105408_0255_T.tiff':
+        #     print ('hi file')
+        # else:
+        #     return  np.nan, 0
+
+        img1 = img_array[:,:,i1]
+        img2 = img_array[:,:,i2]
+        
+        img1_cv = cv2.normalize(img1, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+        img2_cv = cv2.normalize(img2, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+        img1_enhanced = clahe.apply(img1_cv)
+        img2_enhanced = clahe.apply(img2_cv)
+
+        sift = cv2.SIFT_create()
+
+        kp1, des1 = sift.detectAndCompute(img1_enhanced, None)
+        kp2, des2 = sift.detectAndCompute(img2_enhanced, None)
+
+        bf = cv2.BFMatcher()
+
+        matches = bf.knnMatch(des1, des2, k=2) # k=2 for ratio test
+
+        good_matches = []
+        for m, n in matches:
+            if m.distance < 0.75 * n.distance: # Lowe's ratio test
+                good_matches.append(m)
+
+        if len (good_matches) < 10:
+            return np.nan, 0
+
+        img1_pts = []
+        img2_pts = []
+
+        for match in good_matches:
+            # Get the keypoints for the match
+            img1_idx = match.queryIdx  # Index in first image
+            img2_idx = match.trainIdx  # Index in second image
+            
+            # Get coordinates from keypoints
+            img1_pt = kp1[img1_idx].pt  # (x, y) in first image
+            img2_pt = kp2[img2_idx].pt  # (x, y) in second image
+            
+            img1_pts.append(img1_pt)
+            img2_pts.append(img2_pt)
+
+        # Convert to numpy arrays for easier manipulation
+        img1_pts = np.array(img1_pts)
+        img2_pts = np.array(img2_pts)
+
+        img1_coords = np.round(img1_pts).astype(int)
+        img2_coords = np.round(img2_pts).astype(int)
+
+        img1_tiff_values = img1[img1_coords[:, 1], img1_coords[:, 0]]
+        img2_tiff_values = img2[img2_coords[:, 1], img2_coords[:, 0]]
+        
+        delta_t = np.mean(img1_tiff_values - img2_tiff_values)
+        weight = img1_tiff_values.shape[0]
+        return delta_t, weight
+    else:
+        return np.nan, 0
+
+def calc_diff_matrix (img_array, img_df, diff_func = img_diff_poly):
     corr_matrix = np.zeros((img_df.shape[0], img_df.shape[0]))*np.nan
     corr_weights = np.zeros((img_df.shape[0], img_df.shape[0]))
 
     for i1, pol1 in enumerate(tqdm (img_df['Polygon'])):
         for i2, pol2 in enumerate (img_df['Polygon']):
             if np.isnan (corr_matrix[i2,i1]):
-                corr_matrix[i1,i2], corr_weights[i1,i2] = compare_polygons (img_array, img_df, i1, i2)
+                corr_matrix[i1,i2], corr_weights[i1,i2] = diff_func (img_array, img_df, i1, i2)
             else:
                 corr_matrix[i1,i2] = -corr_matrix[i2,i1]
                 corr_weights[i1,i2] = corr_weights[i2,i1]
@@ -277,6 +351,41 @@ def read_IR_image (file):
             exif_df[key] = str (exif_tags[key])
 
     return {'img_data': cur_array, 'img_info': exif_df}
+
+
+def try_dump_pkl (obj, path, max_attempts = 10):
+    dump_ok = False
+    n_attempts = 0
+    while not dump_ok:
+        try:
+            with open(path, 'wb') as handle:
+                pickle.dump(obj, handle, protocol=pickle.HIGHEST_PROTOCOL)
+            dump_ok = True
+        except Exception as err:
+            if n_attempts < max_attempts:
+                time.sleep(1)
+                pass  
+            else:
+                raise err          
+
+        n_attempts += 1
+
+def try_load_pkl (path, max_attempts = 10):
+    dump_ok = False
+    n_attempts = 0
+    while not dump_ok:
+        try:
+            with open(path, 'rb') as handle:
+                res = pickle.load(handle)
+            dump_ok = True
+            return res
+        except Exception as err:
+            if n_attempts < max_attempts:
+                time.sleep(1)
+                pass  
+            else:
+                raise err          
+        n_attempts += 1
 
 
 def read_IR_images (data_dir, reload = False, n_jobs = 1, N_files = None):
@@ -476,7 +585,7 @@ def preview_photos (img_data, img_df, idx2preview, diff_matrix = None, save_dir 
 
     img_shape = img_data.shape
 
-    if f is not None and not os.path.isdir (save_dir):
+    if save_dir is not None and not os.path.isdir (save_dir):
         os.mkdir (save_dir)
 
     plt.figure()
