@@ -7,6 +7,7 @@ from scipy import  ndimage
 from IR_processing_utils import *
 import cv2
 import lowess
+import warnings
 
 
 def apply_corr2diff_matrix (corr_matrix, corr):
@@ -58,29 +59,38 @@ def run_L0_corr (img_array, img_df, sm_radius, bt_sample_size = 200, bt_repeat_n
         
         # mean_corr = img_array_bt[:,:,dir_idx].mean(axis=2) - img_array_bt[:,:,dir_idx].mean()
         
-        mean_corr = bt_corrs.mean(axis=2)
-        mean_corr_sm = circular_filter (mean_corr, sm_radius)
+
+
+        bt_mean_corr = bt_corrs.mean(axis=2)
+        bt_mean_corr_sm = circular_filter (bt_mean_corr, sm_radius)
+
+        simple_mean_corr = img_array[:,:,dir_idx].mean(axis=2) - img_array[:,:,dir_idx].mean()
         
         for i in dir_idx: #range (0, img_N):
-            img_array_new[:,:,i]  = img_array_new[:,:,i]  - mean_corr_sm
+            img_array_new[:,:,i]  = img_array_new[:,:,i]  - bt_mean_corr_sm
 
-        f, ax = plt.subplots (1,3, sharex=True, sharey=True, figsize=(10,4))
+        f, ax = plt.subplots (1,4, sharex=True, sharey=True, figsize=(10,4))
         plt.subplots_adjust(left = 0.01, bottom = 0.01,top = 0.98, right = 0.98) #, hspace=0.01,wspace=0.01)
 
         if pics_dir is not None:
             
             plt.axes(ax[0])
+            plt.pcolormesh(simple_mean_corr, vmin=-0.75, vmax=0.75, cmap = 'seismic')
+            plt.gca().set_aspect(1)
+            plt.title ('Simple mean')
+
+            plt.axes(ax[1])
             plt.pcolormesh(np.mean(bt_corrs, axis=2), vmin=-0.75, vmax=0.75, cmap = 'seismic')
             plt.gca().set_aspect(1)
             plt.title ('Bootstrap mean')
             
-            plt.axes(ax[1])
+            plt.axes(ax[2])
             plt.pcolormesh(np.std(bt_corrs, axis=2), vmin=-0.75, vmax=0.75, cmap = 'seismic')
             plt.gca().set_aspect(1)
             plt.title ('Bootstrap std')
             
-            plt.axes(ax[2])
-            plt.pcolormesh(mean_corr_sm, vmin=-0.75, vmax=0.75, cmap = 'seismic')
+            plt.axes(ax[3])
+            plt.pcolormesh(bt_mean_corr_sm, vmin=-0.75, vmax=0.75, cmap = 'seismic')
             plt.gca().set_aspect(1)
             plt.title ('Correction')
 
@@ -241,16 +251,19 @@ def run_L3_corr (img_array, img_df, diff_matrix, diff_weights, n_steps, wnd_size
             ind2sel_az =  np.where(~np.isnan(diff_line) & (gps_az_diff > 45))[0]
 
             #L3_corr[i] = -np.mean(diff_line[ind2sel_az])/2
-            L3_corr[i] = -0.5 * np.sum(diff_line[ind2sel_az] * weight_line[ind2sel_az]) / np.sum(weight_line[ind2sel_az])
+            if len (ind2sel_az) > 0:
+                L3_corr[i] = -0.5 * np.sum(diff_line[ind2sel_az] * weight_line[ind2sel_az]) / np.sum(weight_line[ind2sel_az])
+            else:
+                warnings.warn(f"Could not find any indices  from other swaths for i = {i}", UserWarning)
+                
+            # if np.isnan(L3_corr[i]):
+            #     idx2test = i
 
-            if np.isnan(L3_corr[i]):
-                idx2test = i
+            #     display (mean_t2[idx2test])
+            #     display (mean_t2[ind2sel_az])
+            #     display (corr_line[ind2sel_az])
 
-                display (mean_t2[idx2test])
-                display (mean_t2[ind2sel_az])
-                display (corr_line[ind2sel_az])
-
-                ind2draw = slice (np.min(ind2sel), np.max(ind2sel))
+            #     ind2draw = slice (np.min(ind2sel), np.max(ind2sel))
                 # plt.figure()
                 # plt.scatter(img_df['gps_lon'], img_df['gps_lat'], 25, mean_t2, edgecolor = 'white')
                 # plt.scatter(img_df['gps_lon'][ind2draw], img_df['gps_lat'][ind2draw], 25, mean_t2[ind2draw], edgecolor = 'gray')

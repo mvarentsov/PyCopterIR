@@ -305,7 +305,7 @@ def write_IR_image (img_data, dest_path, exif_src_path = None, exiftool_path = '
 
         if exif_src_path is not None:
 
-            cmd = '%s -tagsfromfile "%s" "%s"'%(exiftool_path, exif_src_path, dest_path)
+            cmd = '%s -tagsfromfile "%s" "%s" > out.txt'%(exiftool_path, exif_src_path, dest_path)
             subprocess.run(cmd, check=True, shell=True)
             os.remove(dest_path + '_original')
 
@@ -318,8 +318,8 @@ def write_IR_image_dict (d:dict):
 def write_IR_images (img_array:np.ndarray, img_df:pd.DataFrame, out_dir:str,  n_jobs = 1, exiftool_path = 'exiftool.exe', update_files = True):
     
     d = [{'img_data': img_array[:,:,i], 
-          'dest_path':     out_dir + '\\' + img_df['file'][idx], 
-          'exif_src_path': img_df['folder'][idx] + '\\' + img_df['file'][idx], 
+          'dest_path':     out_dir + '/' + img_df['file'][idx], 
+          'exif_src_path': img_df['folder'][idx] + '/' + img_df['file'][idx], 
           'exiftool_path': exiftool_path,
           'update_files': update_files} for i, idx in enumerate(img_df.index)]
 
