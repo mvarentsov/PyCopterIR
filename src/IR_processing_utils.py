@@ -298,33 +298,40 @@ def apply_corr2array (img_array, corr):
 
     return img_array_corr
 
-def write_IR_image (img_data, dest_path, exif_src_path = None, exiftool_path = 'exiftool.exe', update_files = True):
+def write_IR_image (img_data, dest_path, exif_src_path = None, exiftool_dir = '', update_files = True):
         
     if not os.path.isfile (dest_path) or update_files:
         tiff.imwrite(dest_path, np.flipud(img_data), photometric='minisblack')
 
         if exif_src_path is not None:
 
-            cmd = '%s -tagsfromfile "%s" "%s" > out.txt'%(exiftool_path, exif_src_path, dest_path)
+            if os.name == 'nt':
+                exiftool_exe = exiftool_dir + 'exiftool.exe'
+                cmd = '%s -tagsfromfile "%s" "%s"'%(exiftool_exe, exif_src_path, dest_path)
+            else:
+                exiftool_exe = './' + exiftool_dir + 'exiftool'
+                cmd = '%s -tagsfromfile "%s" "%s" > out.txt'%(exiftool_exe, exif_src_path, dest_path)
+                
             subprocess.run(cmd, check=True, shell=True)
             os.remove(dest_path + '_original')
 
     return True
 
-
-def write_IR_image_dict (d:dict):
-    return write_IR_image (d['img_data'], d['dest_path'], d['exif_src_path'], d['exiftool_path'], d['update_files'])
-
-def write_IR_images (img_array:np.ndarray, img_df:pd.DataFrame, out_dir:str,  n_jobs = 1, exiftool_path = 'exiftool.exe', update_files = True):
+def write_IR_images (img_array:np.ndarray, img_df:pd.DataFrame, out_dir:str,  n_jobs = 1, exiftool_dir = '', update_files = True):
     
     d = [{'img_data': img_array[:,:,i], 
           'dest_path':     out_dir + '/' + img_df['file'][idx], 
           'exif_src_path': img_df['folder'][idx] + '/' + img_df['file'][idx], 
-          'exiftool_path': exiftool_path,
+          'exiftool_dir': exiftool_dir,
           'update_files': update_files} for i, idx in enumerate(img_df.index)]
 
-    with Pool(n_jobs) as p:
-        res = list(p.imap(write_IR_image_dict, tqdm(d, total=len(d))))
+    func4mapping = lambda d: write_IR_image (**d) 
+
+    if n_jobs == 1:
+        res = list(map(func4mapping, tqdm(d, total=len(d)))) 
+    else:
+        with Pool(n_jobs) as p:
+            res = list(p.imap(func4mapping, tqdm(d, total=len(d))))
 
 
 def read_IR_image (file):
@@ -570,7 +577,7 @@ def sigma_tend_corr_multi (diff2prev, n_sigma=3, max_iter = 10):
         if len (cur_ind) == 0:
             break
         corr += cur_corr
-        display('n_outliers = %d, max_diff = %f'%(len(cur_ind), np.max (np.abs(diff2prev[cur_ind]))))
+        print('n_outliers = %d, max_diff = %f\n'%(len(cur_ind), np.max (np.abs(diff2prev[cur_ind]))))
         outlier_ind += cur_ind
 
     return corr, diff2prev_c, outlier_ind

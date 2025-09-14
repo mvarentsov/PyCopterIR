@@ -46,7 +46,7 @@ plt.rcParams['font.size'] = 7
 #data_dir = r'G:\! Data\IFA\! campaigns\202404 Pleistocene Park\IR_mavic3\DJI_202404231239_024_Pleystocen-IR3'; flight_height = 220
 
 #data_dir = '../../../data/IR_processing/202404 Pleistocene Park/Mavic3_IR/DJI_202404211121_009_Pleystocen-IRb'; flight_height = 160
-data_dir = '../../../data/IR_processing/202404 Pleistocene Park/Mavic3_IR/DJI_202404231239_024_Pleystocen-IR3'; flight_height = 220
+#data_dir = '../../../data/IR_processing/202404 Pleistocene Park/Mavic3_IR/DJI_202404231239_024_Pleystocen-IR3'; flight_height = 220
 
 
 #data_dir = r"G:\! Data\IFA\! campaigns\292406 Mukhrino\IR processing\2024.6.4\16_16\DJI_202406041912_048_muhrino-big-2"; flight_height = 150
@@ -64,7 +64,7 @@ data_dir = '../../../data/IR_processing/202404 Pleistocene Park/Mavic3_IR/DJI_20
 #data_dir = r"G:\! Data\IFA\! campaigns\202503 Ayhal\Mavic_IR_imaging\20250327_evn"; flight_height = 370
 #data_dir = r"G:\! Data\IFA\! campaigns\202503 Ayhal\Mavic_IR_imaging\20250328_morning"; flight_height = 630
 
-#data_dir = r"M:\202507 Ingilor\Mavic3_IR\20250717_Vol2_evening"; flight_height = 280
+data_dir = r"M:\202507 Ingilor\Mavic3_IR\20250717_Vol2_evening"; flight_height = 280
 
 #data_dir = r"M:\202507 Ingilor\Mavic3_IR\20250718_no3_Vol1a_noshield"; flight_height = 300
 #data_dir = r"M:\202507 Ingilor\Mavic3_IR\20250718_no4_Vol1a_shield"; flight_height = 300
@@ -72,8 +72,8 @@ data_dir = '../../../data/IR_processing/202404 Pleistocene Park/Mavic3_IR/DJI_20
 
 
 # Имя подпапки с тифами (если подпаки нет, указать None). Актуально например при наличие разных версий конвертации jpg->tiff. 
-data_subdir = 'tiffs_thermal_parser, emis = 1.00'
-#data_subdir = None
+#data_subdir = 'tiffs_thermal_parser, emis = 1.00'
+data_subdir = None
 
 sensor_size = [6.144, 7.68] #Mavic sensor size in mm
 
@@ -98,7 +98,7 @@ if len (dji_subdirs) == 0:
 
 img_array = {}
 for i, dji_subdir in enumerate (dji_subdirs):
-    display(dji_subdir)
+    print(f'{dji_subdir}\n')
     if data_subdir is not None:
         data_dir_src = dji_subdir + '/' + data_subdir + '/'
     else:
@@ -120,7 +120,7 @@ img_N = img_df.shape[0]
 img_df = IR_processing_utils.calc_azimuth4df (img_df)
 img_df = IR_processing_utils.init_polygons4df (img_df, sensor_size, flight_height)
 
-display(img_df.head())
+#display(img_df.head())
 
 pics_dir = data_dir + '/processing_pics' + (('_' + data_subdir) if data_subdir is not None else '') + '/'
 if not os.path.isdir (pics_dir):

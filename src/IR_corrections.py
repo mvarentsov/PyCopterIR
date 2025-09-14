@@ -29,12 +29,18 @@ def circular_filter(image_data, radius):
 
 def run_L0_corr (img_array, img_df, sm_radius, bt_sample_size = 200, bt_repeat_n = 50, pics_dir = None, fig_name = 'L0_corr', reload_pkl = False):
     img_N = img_array.shape[2]
+
+    
     img_array_new = img_array.copy()
     
     unique_dirs = img_df['folder'].unique()
 
     for unique_dir in unique_dirs:
         dir_idx = np.where(img_df['folder'] == unique_dir)[0]
+
+        dir_name = os.path.basename(os.path.normpath(unique_dir))
+
+        assert len(dir_idx) > 30, f'Number of images in {unique_dir} is too small: {len(dir_idx)} <= 30'
 
         pkl_path = unique_dir + 't0_bt_corrs.pkl'
         
@@ -95,7 +101,7 @@ def run_L0_corr (img_array, img_df, sm_radius, bt_sample_size = 200, bt_repeat_n
             plt.title ('Correction')
 
             plt.suptitle(unique_dir)
-            plt.savefig(pics_dir + fig_name + '_new.png')
+            plt.savefig(pics_dir + fig_name + f'_new_{dir_name}.png')
         
     return img_array_new
 
